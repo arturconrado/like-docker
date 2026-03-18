@@ -27,6 +27,15 @@ go.work.sum
 # env file
 .env
 
+# Node / frontend
+node_modules/
+dist/
+*.tsbuildinfo
+
 # Editor/IDE
 # .idea/
 # .vscode/
+
+# Demo artifacts
+examples/rootfs/demo/
+examples/bundles/demo/
