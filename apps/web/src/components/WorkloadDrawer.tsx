@@ -83,6 +83,10 @@ export function WorkloadDrawer({ workload, stopping, removing, onClose, onStop, 
                   <dd className="text-zinc-200">{modeLabel(workload.mode)}</dd>
                 </div>
                 <div>
+                  <dt className="text-zinc-500">Modo usado</dt>
+                  <dd className="text-zinc-200">{workload.runtime.modeUsed || '—'}</dd>
+                </div>
+                <div>
                   <dt className="text-zinc-500">Rootfs</dt>
                   <dd className="truncate text-zinc-200">{workload.runtime.rootfs || '—'}</dd>
                 </div>
@@ -149,7 +153,7 @@ export function WorkloadDrawer({ workload, stopping, removing, onClose, onStop, 
               <button
                 type="button"
                 onClick={() => onStop(workload)}
-                disabled={stopping || (workload.status !== 'Running' && workload.status !== 'Pending')}
+                disabled={stopping || !['Pending', 'Preparing', 'Starting', 'Running'].includes(workload.status)}
                 className="inline-flex items-center gap-2 rounded-lg border border-amber-400/30 px-4 py-2 text-sm font-semibold text-amber-200 enabled:hover:bg-amber-500/20 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <PauseCircle className="size-4" />

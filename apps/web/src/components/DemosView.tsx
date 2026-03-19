@@ -76,7 +76,7 @@ export function DemosView({
     queryFn: () => validateDemo(resolvedDemoID as string),
     enabled: runnerOpen && Boolean(resolvedDemoID),
     refetchInterval:
-      activeWorkload?.status === 'Running' || activeWorkload?.status === 'Pending' ? 2500 : false,
+      activeWorkload && ['Pending', 'Preparing', 'Starting', 'Running'].includes(activeWorkload.status) ? 2500 : false,
     retry: 1,
   })
 
@@ -121,14 +121,14 @@ export function DemosView({
             <p className="text-xs uppercase tracking-[0.18em] text-cyan-200/90">Demonstração Principal</p>
             <h4 className="mt-1 text-2xl font-semibold text-cyan-50">PostgreSQL Demo</h4>
             <p className="mt-2 text-sm text-cyan-50/90">
-              Esta jornada prova que a plataforma opera workloads stateful, com preparação, execução, logs, readiness
-              e fallback elegante quando necessário.
+              Esta jornada prova que a plataforma opera workloads stateful com prioridade para binários locais reais
+              do PostgreSQL em Linux, preservando fallback elegante quando necessário.
             </p>
             <div className="mt-3 grid gap-2 text-xs text-cyan-100/90 sm:grid-cols-2">
-              <span className="rounded-lg border border-cyan-300/30 bg-cyan-500/10 px-3 py-2">1. O sistema prepara ambiente e contexto.</span>
-              <span className="rounded-lg border border-cyan-300/30 bg-cyan-500/10 px-3 py-2">2. A workload sobe com status e logs em tempo real.</span>
-              <span className="rounded-lg border border-cyan-300/30 bg-cyan-500/10 px-3 py-2">3. Evidências mostram porta, data dir e readiness.</span>
-              <span className="rounded-lg border border-cyan-300/30 bg-cyan-500/10 px-3 py-2">4. Se faltar capacidade no host, fallback preserva a experiência.</span>
+              <span className="rounded-lg border border-cyan-300/30 bg-cyan-500/10 px-3 py-2">1. O ambiente valida Linux, binários, diretório temporário e porta livre.</span>
+              <span className="rounded-lg border border-cyan-300/30 bg-cyan-500/10 px-3 py-2">2. O cluster sobe com `initdb`, `postgres` e logs reais em tempo real.</span>
+              <span className="rounded-lg border border-cyan-300/30 bg-cyan-500/10 px-3 py-2">3. Evidências mostram porta, data dir, PID e readiness.</span>
+              <span className="rounded-lg border border-cyan-300/30 bg-cyan-500/10 px-3 py-2">4. Se faltar capacidade no host, o fallback fica explícito na jornada.</span>
             </div>
           </div>
           <button

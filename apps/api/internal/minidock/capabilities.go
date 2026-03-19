@@ -1,6 +1,7 @@
 package minidock
 
 import (
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -9,19 +10,26 @@ import (
 )
 
 type HostCapabilities struct {
-	OS                         string      `json:"os"`
-	SupportsProcessLocal       bool        `json:"supportsProcessLocal"`
-	SupportsContainers         bool        `json:"supportsContainers"`
-	SupportsNamespaces         bool        `json:"supportsNamespaces"`
-	SupportsPivotRoot          bool        `json:"supportsPivotRoot"`
-	RootfsAvailable            bool        `json:"rootfsAvailable"`
-	RootfsPath                 string      `json:"rootfsPath,omitempty"`
-	HasRootPrivileges          bool        `json:"hasRootPrivileges"`
-	PostgresLocalAvailable     bool        `json:"postgresLocalAvailable"`
-	PostgresContainerAvailable bool        `json:"postgresContainerAvailable"`
-	SupportsPostgresDemo       bool        `json:"supportsPostgresDemo"`
-	RecommendedMode            RuntimeMode `json:"recommendedMode"`
-	Notes                      []string    `json:"notes"`
+	OS                         string              `json:"os"`
+	IsLinux                    bool                `json:"isLinux"`
+	SupportsProcessLocal       bool                `json:"supportsProcessLocal"`
+	SupportsContainers         bool                `json:"supportsContainers"`
+	SupportsNamespaces         bool                `json:"supportsNamespaces"`
+	SupportsPivotRoot          bool                `json:"supportsPivotRoot"`
+	RootfsAvailable            bool                `json:"rootfsAvailable"`
+	RootfsPath                 string              `json:"rootfsPath,omitempty"`
+	HasRootPrivileges          bool                `json:"hasRootPrivileges"`
+	PostgresLocalAvailable     bool                `json:"postgresLocalAvailable"`
+	PostgresContainerAvailable bool                `json:"postgresContainerAvailable"`
+	SupportsPostgresDemo       bool                `json:"supportsPostgresDemo"`
+	RecommendedMode            RuntimeMode         `json:"recommendedMode"`
+	PostgresBinariesAvailable  bool                `json:"postgresBinariesAvailable"`
+	PostgresBinaryPaths        PostgresBinaryPaths `json:"postgresBinaryPaths"`
+	CanCreateTempDir           bool                `json:"canCreateTempDir"`
+	CanAllocatePort            bool                `json:"canAllocatePort"`
+	CanRunPostgresDemo         bool                `json:"canRunPostgresDemo"`
+	RecommendedPostgresMode    PostgresDemoMode    `json:"recommendedPostgresMode"`
+	Notes                      []string            `json:"notes"`
 }
 
 func DetectHostCapabilities(rootfsHint string) HostCapabilities {
@@ -31,7 +39,14 @@ func DetectHostCapabilities(rootfsHint string) HostCapabilities {
 
 	rootfsPath := resolveRootfsPath(rootfsHint)
 	rootfsAvailable := rootfsPath != "" && isUsableRootfs(rootfsPath)
-	postgresLocalAvailable := binaryExists("postgres") && binaryExists("initdb")
+	postgresBinaryPaths := detectPostgresBinaryPaths()
+	postgresBinariesAvailable := postgresBinaryPaths.Initdb != "" &&
+		postgresBinaryPaths.Postgres != "" &&
+		postgresBinaryPaths.PGIsReady != ""
+	canCreateTempDir := canCreateTemporaryDirectory()
+	canAllocatePort := canAllocateLocalPort()
+	canRunPostgresDemo := isLinux && !hasRoot && postgresBinariesAvailable && canCreateTempDir && canAllocatePort
+	postgresLocalAvailable := postgresBinariesAvailable
 	postgresContainerAvailable := hasRootfsBinary(rootfsPath, "postgres") && hasRootfsBinary(rootfsPath, "initdb")
 	supportsPostgresDemo := true
 	supportsNamespaces := isLinux &&
@@ -46,6 +61,9 @@ func DetectHostCapabilities(rootfsHint string) HostCapabilities {
 	if !isLinux {
 		notes = append(notes, "Host não é Linux; container-linux fica indisponível e o sistema usa fallback automático.")
 	}
+	if hasRoot {
+		notes = append(notes, "Processo atual está em root; initdb local do PostgreSQL exige usuário não-root para o caminho processo-local-real.")
+	}
 	if isLinux && !hasRoot {
 		notes = append(notes, "Sem privilégios root para chroot/namespaces; container-linux requer sudo neste MVP.")
 	}
@@ -58,23 +76,42 @@ func DetectHostCapabilities(rootfsHint string) HostCapabilities {
 	if supportsContainers {
 		notes = append(notes, "Host apto para execução container-linux em modo avançado.")
 	}
-	if postgresLocalAvailable {
+	if postgresBinariesAvailable {
 		notes = append(notes, "Binários locais de PostgreSQL detectados para execução processo-local.")
 	}
 	if postgresContainerAvailable {
 		notes = append(notes, "Rootfs contém binários PostgreSQL para tentativa em container-linux.")
 	}
-	if !postgresLocalAvailable && !postgresContainerAvailable {
+	if !canCreateTempDir {
+		notes = append(notes, "Não foi possível validar criação de diretório temporário para PGDATA local.")
+	}
+	if !canAllocatePort {
+		notes = append(notes, "Não foi possível reservar porta TCP local para o PostgreSQL Demo.")
+	}
+	if !postgresBinariesAvailable && !postgresContainerAvailable {
 		notes = append(notes, "PostgreSQL real não foi detectado; a demonstração PostgreSQL usará fallback para modo demo quando necessário.")
+	}
+	if canRunPostgresDemo {
+		notes = append(notes, "O PostgreSQL Demo pode rodar em Linux real com binários locais do host.")
 	}
 
 	recommended := ModeProcessLocal
 	if supportsContainers {
 		recommended = ModeContainerLinux
 	}
+	recommendedPostgresMode := PostgresModeDemo
+	switch {
+	case canRunPostgresDemo:
+		recommendedPostgresMode = PostgresModeProcessLocalReal
+	case supportsContainers && postgresContainerAvailable:
+		recommendedPostgresMode = PostgresModeContainerLinux
+	default:
+		recommendedPostgresMode = PostgresModeDemo
+	}
 
 	return HostCapabilities{
 		OS:                         osName,
+		IsLinux:                    isLinux,
 		SupportsProcessLocal:       true,
 		SupportsContainers:         supportsContainers,
 		SupportsNamespaces:         supportsNamespaces,
@@ -86,6 +123,12 @@ func DetectHostCapabilities(rootfsHint string) HostCapabilities {
 		PostgresContainerAvailable: postgresContainerAvailable,
 		SupportsPostgresDemo:       supportsPostgresDemo,
 		RecommendedMode:            recommended,
+		PostgresBinariesAvailable:  postgresBinariesAvailable,
+		PostgresBinaryPaths:        postgresBinaryPaths,
+		CanCreateTempDir:           canCreateTempDir,
+		CanAllocatePort:            canAllocatePort,
+		CanRunPostgresDemo:         canRunPostgresDemo,
+		RecommendedPostgresMode:    recommendedPostgresMode,
 		Notes:                      notes,
 	}
 }
@@ -145,9 +188,38 @@ func fileExists(path string) bool {
 	return err == nil && !info.IsDir()
 }
 
-func binaryExists(name string) bool {
-	_, err := exec.LookPath(name)
-	return err == nil
+func detectPostgresBinaryPaths() PostgresBinaryPaths {
+	return PostgresBinaryPaths{
+		Initdb:    lookupBinary("initdb"),
+		Postgres:  lookupBinary("postgres"),
+		PGIsReady: lookupBinary("pg_isready"),
+	}
+}
+
+func lookupBinary(name string) string {
+	path, err := exec.LookPath(name)
+	if err != nil {
+		return ""
+	}
+	return path
+}
+
+func canCreateTemporaryDirectory() bool {
+	dir, err := os.MkdirTemp("", "minidock-capabilities-*")
+	if err != nil {
+		return false
+	}
+	_ = os.RemoveAll(dir)
+	return true
+}
+
+func canAllocateLocalPort() bool {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return false
+	}
+	_ = listener.Close()
+	return true
 }
 
 func hasRootfsBinary(rootfsPath, name string) bool {

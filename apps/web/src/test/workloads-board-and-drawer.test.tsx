@@ -35,6 +35,7 @@ const sampleWorkload: Workload = {
     port: 0,
     dataDir: '',
     readinessState: '',
+    modeUsed: '',
   },
   createdAt: new Date().toISOString(),
 }

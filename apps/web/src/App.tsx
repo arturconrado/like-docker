@@ -80,7 +80,7 @@ function App() {
     queryFn: () => getWorkload(selectedWorkloadId as string),
     enabled: Boolean(selectedWorkloadId),
     refetchInterval: (query) =>
-      query.state.data?.status === 'Running' || query.state.data?.status === 'Pending' ? 1500 : false,
+      query.state.data && ['Pending', 'Preparing', 'Starting', 'Running'].includes(query.state.data.status) ? 1500 : false,
   })
 
   const createMutation = useMutation({

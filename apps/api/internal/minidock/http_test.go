@@ -172,6 +172,9 @@ func TestCapabilitiesEndpoint(t *testing.T) {
 	if caps.RecommendedMode == "" {
 		t.Fatal("recommendedMode não pode ser vazio")
 	}
+	if caps.RecommendedPostgresMode == "" {
+		t.Fatal("recommendedPostgresMode não pode ser vazio")
+	}
 }
 
 func TestDemoSeedEndpoint(t *testing.T) {
@@ -288,6 +291,45 @@ func newTestServer() (*httptest.Server, *Manager) {
 	api := NewAPIServer(manager)
 	server := httptest.NewServer(api.Handler())
 	return server, manager
+}
+
+func TestResolveModeForPostgresDemoPriority(t *testing.T) {
+	spec, ok := getDemoSpec("postgres-demo")
+	if !ok {
+		t.Fatal("demo postgres-demo deveria existir")
+	}
+
+	mode, reason := resolveModeForDemo(spec, HostCapabilities{
+		CanRunPostgresDemo:         true,
+		SupportsContainers:         true,
+		PostgresContainerAvailable: true,
+	})
+	if mode != ModeProcessLocal {
+		t.Fatalf("modo esperado processo-local para PostgreSQL real, recebido %s", mode)
+	}
+	if reason != "" {
+		t.Fatalf("não esperava fallback reason para modo real, recebido %q", reason)
+	}
+
+	mode, reason = resolveModeForDemo(spec, HostCapabilities{
+		CanRunPostgresDemo:         false,
+		SupportsContainers:         true,
+		PostgresContainerAvailable: true,
+	})
+	if mode != ModeContainerLinux {
+		t.Fatalf("modo esperado container-linux como segunda prioridade, recebido %s", mode)
+	}
+	if reason == "" {
+		t.Fatal("esperava fallback reason ao redirecionar para container-linux")
+	}
+
+	mode, reason = resolveModeForDemo(spec, HostCapabilities{})
+	if mode != ModeDemo {
+		t.Fatalf("modo esperado demo como fallback final, recebido %s", mode)
+	}
+	if reason == "" {
+		t.Fatal("esperava fallback reason ao redirecionar para demo")
+	}
 }
 
 func createWorkload(t *testing.T, server *httptest.Server, body map[string]any) Workload {

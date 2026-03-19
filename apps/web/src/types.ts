@@ -1,8 +1,16 @@
-export type WorkloadStatus = 'Pending' | 'Running' | 'Completed' | 'Failed' | 'Stopped'
+export type WorkloadStatus = 'Pending' | 'Preparing' | 'Starting' | 'Running' | 'Completed' | 'Failed' | 'Stopped'
 
 export type RiskLevel = 'Safe' | 'Review' | 'Risky'
 
 export type RuntimeMode = 'demo' | 'processo-local' | 'container-linux' | 'namespace-runtime'
+
+export type PostgresDemoMode = 'processo-local-real' | 'container-linux' | 'demo'
+
+export interface PostgresBinaryPaths {
+  initdb?: string
+  postgres?: string
+  pgIsready?: string
+}
 
 export interface RuntimeMetadata {
   engine: string
@@ -14,6 +22,7 @@ export interface RuntimeMetadata {
   port?: number
   dataDir?: string
   readinessState?: string
+  modeUsed?: string
 }
 
 export interface Workload {
@@ -58,6 +67,7 @@ export interface HealthResponse {
 
 export interface HostCapabilities {
   os: string
+  isLinux: boolean
   supportsProcessLocal: boolean
   supportsContainers: boolean
   supportsNamespaces: boolean
@@ -69,6 +79,12 @@ export interface HostCapabilities {
   postgresContainerAvailable: boolean
   supportsPostgresDemo: boolean
   recommendedMode: RuntimeMode
+  postgresBinariesAvailable: boolean
+  postgresBinaryPaths: PostgresBinaryPaths
+  canCreateTempDir: boolean
+  canAllocatePort: boolean
+  canRunPostgresDemo: boolean
+  recommendedPostgresMode: PostgresDemoMode
   notes: string[]
 }
 

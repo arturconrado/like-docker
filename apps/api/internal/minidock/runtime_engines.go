@@ -6,9 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -18,6 +20,10 @@ type RuntimeInspect struct {
 	Rootfs            string
 	ContainerHostname string
 	MainPID           int
+	Port              int
+	DataDir           string
+	ReadinessState    string
+	ModeUsed          string
 }
 
 type RuntimeHandle struct {
@@ -27,11 +33,31 @@ type RuntimeHandle struct {
 	Rootfs            string
 	ContainerHostname string
 	MainPID           int
+	Port              int
+	DataDir           string
+	ReadinessState    string
+	ModeUsed          string
+	OwnDataDir        bool
+}
+
+type RuntimeUpdate struct {
+	Status          *WorkloadStatus
+	Mode            *RuntimeMode
+	Engine          *string
+	Isolated        *bool
+	Port            *int
+	DataDir         *string
+	ReadinessState  *string
+	ModeUsed        *string
+	FallbackApplied *bool
+	FallbackReason  *string
 }
 
 type RuntimeHooks struct {
-	OnLog     func(line string)
-	OnMainPID func(pid int)
+	OnLog           func(line string)
+	OnMainPID       func(pid int)
+	OnStatus        func(status WorkloadStatus)
+	OnRuntimeUpdate func(update RuntimeUpdate)
 }
 
 type RuntimeExecutionResult struct {
@@ -61,11 +87,24 @@ func (e *DemoEngine) Mode() RuntimeMode {
 }
 
 func (e *DemoEngine) Create(workload Workload) (*RuntimeHandle, error) {
-	return &RuntimeHandle{
+	handle := &RuntimeHandle{
 		WorkloadID: workload.ID,
 		Command:    workload.Command,
 		Args:       cloneStringSlice(workload.Args),
-	}, nil
+	}
+	if workload.Command == "minidock-postgres-demo" {
+		handle.Port = workload.Runtime.Port
+		if handle.Port <= 0 {
+			handle.Port = 55432
+		}
+		handle.DataDir = workload.Runtime.DataDir
+		if strings.TrimSpace(handle.DataDir) == "" {
+			handle.DataDir = "/tmp/minidock-postgres-demo-simulated"
+		}
+		handle.ReadinessState = workload.Runtime.ReadinessState
+		handle.ModeUsed = string(PostgresModeDemo)
+	}
+	return handle, nil
 }
 
 func (e *DemoEngine) Start(ctx context.Context, handle *RuntimeHandle, hooks RuntimeHooks) RuntimeExecutionResult {
@@ -80,11 +119,38 @@ func (e *DemoEngine) Start(ctx context.Context, handle *RuntimeHandle, hooks Run
 		duration = 6 * time.Second
 	}
 	if normalized == "minidock-postgres-demo" {
-		duration = 8 * time.Second
+		duration = 45 * time.Second
+		mode := string(PostgresModeDemo)
+		safeRuntimeUpdate(hooks.OnRuntimeUpdate, RuntimeUpdate{
+			Status:         ptrWorkloadStatus(StatusPreparing),
+			Mode:           ptrRuntimeMode(ModeDemo),
+			Engine:         ptrString("demo-engine"),
+			Isolated:       ptrBool(false),
+			Port:           ptrInt(handle.Port),
+			DataDir:        ptrString(handle.DataDir),
+			ReadinessState: ptrString("preparing"),
+			ModeUsed:       &mode,
+		})
+		safeStatus(hooks.OnStatus, StatusPreparing)
 	}
 
 	for _, line := range demoOutputFor(normalized) {
 		safeLog(hooks.OnLog, line)
+	}
+
+	if normalized == "minidock-postgres-demo" {
+		mode := string(PostgresModeDemo)
+		safeRuntimeUpdate(hooks.OnRuntimeUpdate, RuntimeUpdate{
+			Status:         ptrWorkloadStatus(StatusRunning),
+			Mode:           ptrRuntimeMode(ModeDemo),
+			Engine:         ptrString("demo-engine"),
+			Isolated:       ptrBool(false),
+			Port:           ptrInt(handle.Port),
+			DataDir:        ptrString(handle.DataDir),
+			ReadinessState: ptrString("ready"),
+			ModeUsed:       &mode,
+		})
+		safeStatus(hooks.OnStatus, StatusRunning)
 	}
 
 	select {
@@ -122,10 +188,20 @@ func (e *DemoEngine) Logs(_ *RuntimeHandle) []string {
 	return []string{}
 }
 
-func (e *DemoEngine) Inspect(_ *RuntimeHandle) RuntimeInspect {
+func (e *DemoEngine) Inspect(handle *RuntimeHandle) RuntimeInspect {
+	if handle == nil {
+		return RuntimeInspect{
+			Engine:   "demo-engine",
+			Isolated: false,
+		}
+	}
 	return RuntimeInspect{
-		Engine:   "demo-engine",
-		Isolated: false,
+		Engine:         "demo-engine",
+		Isolated:       false,
+		Port:           handle.Port,
+		DataDir:        handle.DataDir,
+		ReadinessState: handle.ReadinessState,
+		ModeUsed:       handle.ModeUsed,
 	}
 }
 
@@ -136,14 +212,45 @@ func (e *LocalProcessEngine) Mode() RuntimeMode {
 }
 
 func (e *LocalProcessEngine) Create(workload Workload) (*RuntimeHandle, error) {
-	return &RuntimeHandle{
+	handle := &RuntimeHandle{
 		WorkloadID: workload.ID,
 		Command:    workload.Command,
 		Args:       cloneStringSlice(workload.Args),
-	}, nil
+	}
+	if workload.Command == "minidock-postgres-demo" {
+		dataDir := strings.TrimSpace(workload.Runtime.DataDir)
+		if dataDir == "" {
+			dir, err := os.MkdirTemp("", "minidock-postgres-*")
+			if err != nil {
+				return nil, fmt.Errorf("falha ao criar diretório temporário para PostgreSQL: %w", err)
+			}
+			dataDir = dir
+			handle.OwnDataDir = true
+		}
+		port := workload.Runtime.Port
+		if port <= 0 {
+			detectedPort, err := findAvailableTCPPort()
+			if err != nil {
+				if handle.OwnDataDir {
+					_ = os.RemoveAll(dataDir)
+				}
+				return nil, fmt.Errorf("falha ao reservar porta local para PostgreSQL: %w", err)
+			}
+			port = detectedPort
+		}
+		handle.DataDir = dataDir
+		handle.Port = port
+		handle.ReadinessState = workload.Runtime.ReadinessState
+		handle.ModeUsed = workload.Runtime.ModeUsed
+	}
+	return handle, nil
 }
 
 func (e *LocalProcessEngine) Start(ctx context.Context, handle *RuntimeHandle, hooks RuntimeHooks) RuntimeExecutionResult {
+	if handle.Command == "minidock-postgres-demo" {
+		return e.startPostgresDemo(ctx, handle, hooks)
+	}
+
 	command, args, preface := effectiveCommand(handle.Command, handle.Args)
 	for _, line := range preface {
 		safeLog(hooks.OnLog, line)
@@ -232,11 +339,23 @@ func (e *LocalProcessEngine) Start(ctx context.Context, handle *RuntimeHandle, h
 	}
 }
 
-func (e *LocalProcessEngine) Stop(_ *RuntimeHandle) error {
+func (e *LocalProcessEngine) Stop(handle *RuntimeHandle) error {
+	if handle == nil || handle.MainPID <= 0 {
+		return nil
+	}
+	if err := syscall.Kill(handle.MainPID, syscall.SIGTERM); err != nil && !errors.Is(err, os.ErrProcessDone) && !errors.Is(err, syscall.ESRCH) {
+		return err
+	}
 	return nil
 }
 
-func (e *LocalProcessEngine) Remove(_ *RuntimeHandle) error {
+func (e *LocalProcessEngine) Remove(handle *RuntimeHandle) error {
+	if handle != nil && handle.MainPID > 0 {
+		_ = e.Stop(handle)
+	}
+	if handle != nil && handle.OwnDataDir && strings.TrimSpace(handle.DataDir) != "" {
+		return os.RemoveAll(handle.DataDir)
+	}
 	return nil
 }
 
@@ -244,10 +363,21 @@ func (e *LocalProcessEngine) Logs(_ *RuntimeHandle) []string {
 	return []string{}
 }
 
-func (e *LocalProcessEngine) Inspect(_ *RuntimeHandle) RuntimeInspect {
+func (e *LocalProcessEngine) Inspect(handle *RuntimeHandle) RuntimeInspect {
+	if handle == nil {
+		return RuntimeInspect{
+			Engine:   "local-process-engine",
+			Isolated: false,
+		}
+	}
 	return RuntimeInspect{
-		Engine:   "local-process-engine",
-		Isolated: false,
+		Engine:         "local-process-engine",
+		Isolated:       false,
+		MainPID:        handle.MainPID,
+		Port:           handle.Port,
+		DataDir:        handle.DataDir,
+		ReadinessState: handle.ReadinessState,
+		ModeUsed:       handle.ModeUsed,
 	}
 }
 
@@ -284,6 +414,18 @@ func safePID(onPID func(int), pid int) {
 	}
 }
 
+func safeStatus(onStatus func(WorkloadStatus), status WorkloadStatus) {
+	if onStatus != nil {
+		onStatus(status)
+	}
+}
+
+func safeRuntimeUpdate(onUpdate func(RuntimeUpdate), update RuntimeUpdate) {
+	if onUpdate != nil {
+		onUpdate(update)
+	}
+}
+
 func demoOutputFor(normalized string) []string {
 	switch normalized {
 	case "/bin/sh -c hostname && pwd && ls /":
@@ -308,9 +450,11 @@ func demoOutputFor(normalized string) []string {
 		return []string{"[stdout] fallback validation"}
 	case "minidock-postgres-demo":
 		return []string{
-			"[stdout] [postgres-demo] preparing data directory /tmp/minidock-postgres-demo",
-			"[stdout] [postgres-demo] PostgreSQL inicializado com sucesso (simulado)",
-			"[stdout] [postgres-demo] Banco pronto para aceitar conexões (simulado)",
+			"[stdout] [postgres-demo] verificação do ambiente: fallback demo ativo",
+			"[stdout] [postgres-demo] preparing data directory /tmp/minidock-postgres-demo-simulated",
+			"[stdout] [postgres-demo] initdb concluído com sucesso (demo)",
+			"[stdout] [postgres-demo] postgres iniciado em modo demonstrativo",
+			"[stdout] [postgres-demo] Serviço pronto para aceitar conexões (demo)",
 			"[stdout] [postgres-demo] readiness: ready",
 		}
 	default:

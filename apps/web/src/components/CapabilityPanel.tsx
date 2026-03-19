@@ -1,4 +1,4 @@
-import { modeLabel } from '../lib/format'
+import { modeLabel, postgresModeLabel } from '../lib/format'
 import type { DemoDefinition, HostCapabilities } from '../types'
 
 interface CapabilityPanelProps {
@@ -16,10 +16,14 @@ export function CapabilityPanel({ capabilities, selectedDemo }: CapabilityPanelP
   }
 
   const checks = [
+    { label: 'Linux', ok: capabilities.isLinux },
     { label: 'Processo local', ok: capabilities.supportsProcessLocal },
     { label: 'Container Linux', ok: capabilities.supportsContainers },
     { label: 'Rootfs demo', ok: capabilities.rootfsAvailable },
-    { label: 'PostgreSQL local', ok: capabilities.postgresLocalAvailable },
+    { label: 'PostgreSQL binários', ok: capabilities.postgresBinariesAvailable },
+    { label: 'PGDATA temporário', ok: capabilities.canCreateTempDir },
+    { label: 'Porta livre', ok: capabilities.canAllocatePort },
+    { label: 'PostgreSQL real', ok: capabilities.canRunPostgresDemo },
     { label: 'PostgreSQL rootfs', ok: capabilities.postgresContainerAvailable },
   ]
 
@@ -32,7 +36,14 @@ export function CapabilityPanel({ capabilities, selectedDemo }: CapabilityPanelP
         </span>
       </div>
 
-      <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+      <div className="mt-3 rounded-xl border border-cyan-400/20 bg-cyan-500/8 px-3 py-3 text-xs text-cyan-50">
+        <p className="uppercase tracking-[0.14em] text-cyan-200/75">PostgreSQL Demo</p>
+        <p className="mt-1 text-sm font-semibold text-cyan-50">
+          Modo recomendado: {postgresModeLabel(capabilities.recommendedPostgresMode)}
+        </p>
+      </div>
+
+      <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
         {checks.map((check) => (
           <div
             key={check.label}
@@ -49,6 +60,15 @@ export function CapabilityPanel({ capabilities, selectedDemo }: CapabilityPanelP
           <p className="text-xs uppercase tracking-[0.16em] text-zinc-500">Demo selecionada</p>
           <p className="mt-1 text-sm text-zinc-200">{selectedDemo.name}</p>
           <p className="text-xs text-zinc-400">Capacidades esperadas: {selectedDemo.requiredCapabilities.join(', ')}</p>
+        </div>
+      )}
+
+      {(capabilities.postgresBinaryPaths.initdb || capabilities.postgresBinaryPaths.postgres || capabilities.postgresBinaryPaths.pgIsready) && (
+        <div className="mt-3 rounded-xl border border-zinc-800 bg-zinc-950/70 px-3 py-3 text-xs text-zinc-300">
+          <p className="uppercase tracking-[0.16em] text-zinc-500">Binários PostgreSQL detectados</p>
+          <p className="mt-2 font-mono text-[11px] text-zinc-400">initdb: {capabilities.postgresBinaryPaths.initdb || '—'}</p>
+          <p className="mt-1 font-mono text-[11px] text-zinc-400">postgres: {capabilities.postgresBinaryPaths.postgres || '—'}</p>
+          <p className="mt-1 font-mono text-[11px] text-zinc-400">pg_isready: {capabilities.postgresBinaryPaths.pgIsready || '—'}</p>
         </div>
       )}
 

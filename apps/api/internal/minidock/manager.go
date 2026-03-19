@@ -147,6 +147,7 @@ func (m *Manager) CreateWorkload(req CreateWorkloadRequest) (Workload, error) {
 			Port:           req.Port,
 			DataDir:        dataDir,
 			ReadinessState: initialReadinessState(workloadType),
+			ModeUsed:       initialModeUsed(mode, workloadType),
 		},
 		CreatedAt: now,
 	}
@@ -176,6 +177,18 @@ func (m *Manager) CreateWorkload(req CreateWorkloadRequest) (Workload, error) {
 	}
 	if inspect.MainPID > 0 {
 		workload.Runtime.MainPID = inspect.MainPID
+	}
+	if inspect.Port > 0 {
+		workload.Runtime.Port = inspect.Port
+	}
+	if inspect.DataDir != "" {
+		workload.Runtime.DataDir = inspect.DataDir
+	}
+	if inspect.ReadinessState != "" {
+		workload.Runtime.ReadinessState = inspect.ReadinessState
+	}
+	if inspect.ModeUsed != "" {
+		workload.Runtime.ModeUsed = inspect.ModeUsed
 	}
 
 	workload.AIInsights = InsightsFor(workload)
@@ -273,6 +286,12 @@ func (m *Manager) runWorkload(id string) {
 		OnMainPID: func(pid int) {
 			m.updateMainPID(id, pid)
 		},
+		OnStatus: func(status WorkloadStatus) {
+			m.updateWorkloadStatus(id, status)
+		},
+		OnRuntimeUpdate: func(update RuntimeUpdate) {
+			m.applyRuntimeUpdate(id, update)
+		},
 	})
 	m.finishWithRuntimeResult(id, result)
 }
@@ -321,7 +340,7 @@ func (m *Manager) StopWorkload(id string) (Workload, error) {
 		m.mu.Unlock()
 		return Workload{}, ErrWorkloadNotFound
 	}
-	if w.data.Status != StatusRunning && w.data.Status != StatusPending {
+	if w.data.Status != StatusRunning && w.data.Status != StatusPending && w.data.Status != StatusPreparing && w.data.Status != StatusStarting {
 		copy := cloneWorkload(w.data)
 		m.mu.Unlock()
 		return copy, nil
@@ -586,11 +605,13 @@ func (m *Manager) transitionToRunning(id string) (Workload, bool) {
 		return cloneWorkload(w.data), false
 	}
 	now := time.Now()
-	w.data.Status = StatusRunning
-	w.data.StartedAt = &now
 	if isDatabaseWorkload(w.data.WorkloadType) {
-		w.data.Runtime.ReadinessState = "starting"
+		w.data.Status = StatusPreparing
+		w.data.Runtime.ReadinessState = "preparing"
+	} else {
+		w.data.Status = StatusRunning
 	}
+	w.data.StartedAt = &now
 	w.data.AIInsights = InsightsFor(w.data)
 	w.data.SuggestedAction = SuggestedActionFor(w.data)
 	go m.addEvent("workload_started", id, "Workload iniciada", SeverityInfo)
@@ -646,7 +667,8 @@ func (m *Manager) finishWithRuntimeResult(id string, result RuntimeExecutionResu
 	}
 	switch result.Status {
 	case StatusCompleted:
-		if isDatabaseWorkload(w.data.WorkloadType) && w.data.Runtime.ReadinessState == "starting" {
+		if isDatabaseWorkload(w.data.WorkloadType) &&
+			(w.data.Runtime.ReadinessState == "starting" || w.data.Runtime.ReadinessState == "preparing") {
 			w.data.Runtime.ReadinessState = "ready"
 		}
 	case StatusStopped:
@@ -701,6 +723,75 @@ func (m *Manager) updateMainPID(id string, pid int) {
 	}
 }
 
+func (m *Manager) updateWorkloadStatus(id string, status WorkloadStatus) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	w, ok := m.workloads[id]
+	if !ok {
+		return
+	}
+	if w.data.FinishedAt != nil {
+		return
+	}
+	w.data.Status = status
+	w.data.AIInsights = InsightsFor(w.data)
+	w.data.SuggestedAction = SuggestedActionFor(w.data)
+}
+
+func (m *Manager) applyRuntimeUpdate(id string, update RuntimeUpdate) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	w, ok := m.workloads[id]
+	if !ok {
+		return
+	}
+	if update.Status != nil && w.data.FinishedAt == nil {
+		w.data.Status = *update.Status
+	}
+	if update.Mode != nil {
+		w.data.Mode = *update.Mode
+	}
+	if update.Engine != nil {
+		w.data.Runtime.Engine = *update.Engine
+	}
+	if update.Isolated != nil {
+		w.data.Runtime.Isolated = *update.Isolated
+	}
+	if update.Port != nil {
+		w.data.Runtime.Port = *update.Port
+		if w.runtimeHandle != nil {
+			w.runtimeHandle.Port = *update.Port
+		}
+	}
+	if update.DataDir != nil {
+		w.data.Runtime.DataDir = *update.DataDir
+		if w.runtimeHandle != nil {
+			w.runtimeHandle.DataDir = *update.DataDir
+		}
+	}
+	if update.ReadinessState != nil {
+		w.data.Runtime.ReadinessState = *update.ReadinessState
+		if w.runtimeHandle != nil {
+			w.runtimeHandle.ReadinessState = *update.ReadinessState
+		}
+	}
+	if update.ModeUsed != nil {
+		w.data.Runtime.ModeUsed = *update.ModeUsed
+		if w.runtimeHandle != nil {
+			w.runtimeHandle.ModeUsed = *update.ModeUsed
+		}
+	}
+	if update.FallbackApplied != nil {
+		w.data.FallbackApplied = *update.FallbackApplied
+	}
+	if update.FallbackReason != nil {
+		w.data.FallbackReason = appendFallbackReason(w.data.FallbackReason, *update.FallbackReason)
+	}
+	w.data.AIInsights = InsightsFor(w.data)
+	w.data.SuggestedAction = SuggestedActionFor(w.data)
+}
+
 func (m *Manager) appendLog(id, line string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -713,9 +804,21 @@ func (m *Manager) appendLog(id, line string) {
 		lower := strings.ToLower(line)
 		if strings.Contains(lower, "ready to accept connections") || strings.Contains(lower, "readiness: ready") {
 			w.data.Runtime.ReadinessState = "ready"
+			if w.data.Status == StatusPreparing || w.data.Status == StatusStarting {
+				w.data.Status = StatusRunning
+			}
 		}
-		if strings.Contains(lower, "starting") && w.data.Runtime.ReadinessState == "" {
+		if strings.Contains(lower, "preparing") && (w.data.Runtime.ReadinessState == "" || w.data.Runtime.ReadinessState == "pending") {
+			w.data.Runtime.ReadinessState = "preparing"
+			if w.data.Status == StatusPending {
+				w.data.Status = StatusPreparing
+			}
+		}
+		if strings.Contains(lower, "starting") && (w.data.Runtime.ReadinessState == "" || w.data.Runtime.ReadinessState == "pending" || w.data.Runtime.ReadinessState == "preparing") {
 			w.data.Runtime.ReadinessState = "starting"
+			if w.data.Status == StatusPending || w.data.Status == StatusPreparing {
+				w.data.Status = StatusStarting
+			}
 		}
 	}
 }
@@ -892,6 +995,20 @@ func initialReadinessState(workloadType string) string {
 		return "pending"
 	}
 	return ""
+}
+
+func initialModeUsed(mode RuntimeMode, workloadType string) string {
+	if !isDatabaseWorkload(workloadType) {
+		return ""
+	}
+	switch canonicalMode(mode) {
+	case ModeContainerLinux:
+		return string(PostgresModeContainerLinux)
+	case ModeDemo:
+		return string(PostgresModeDemo)
+	default:
+		return string(PostgresModeProcessLocalReal)
+	}
 }
 
 func localPostgresDemoScript() string {

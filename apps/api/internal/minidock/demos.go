@@ -107,22 +107,21 @@ var demoCatalog = []demoSpec{
 			Name:          "PostgreSQL Demo",
 			Description:   "Workload stateful para demonstrar maturidade operacional com logs e readiness.",
 			Objective:     "Inicializar PostgreSQL, expor evidências operacionais e readiness.",
-			PreferredMode: ModeContainerLinux,
+			PreferredMode: ModeProcessLocal,
 			WorkloadType:  "Database",
 			Complexity:    "Avançado",
 			RequiredCapabilities: []string{
-				"supportsPostgresDemo",
-				"postgresLocalAvailable ou postgresContainerAvailable",
+				"isLinux",
+				"canRunPostgresDemo ou postgresContainerAvailable",
 			},
 			ExpectedSignals: []string{
-				"logs de inicialização PostgreSQL",
-				"readiness pronto para conexões",
+				"initdb concluído com sucesso",
+				"postgres iniciado com porta dinâmica",
+				"pg_isready confirmou readiness",
 				"porta e data directory visíveis",
 			},
-			Tags:    []string{"database", "stateful", "postgresql"},
-			Icon:    "database",
-			Port:    55432,
-			DataDir: "/tmp/minidock-postgres-demo",
+			Tags: []string{"database", "stateful", "postgresql"},
+			Icon: "database",
 		},
 		Command: "minidock-postgres-demo",
 		Args:    []string{},
@@ -260,11 +259,11 @@ func resolveModeForDemo(spec demoSpec, caps HostCapabilities) (RuntimeMode, stri
 	}
 
 	if id == "postgres-demo" {
-		if caps.SupportsContainers && caps.PostgresContainerAvailable {
-			return ModeContainerLinux, ""
+		if caps.CanRunPostgresDemo {
+			return ModeProcessLocal, ""
 		}
-		if caps.PostgresLocalAvailable {
-			return ModeProcessLocal, "[minidock] host não atende pré-requisitos para PostgreSQL em container-linux; execução redirecionada para processo-local."
+		if caps.SupportsContainers && caps.PostgresContainerAvailable {
+			return ModeContainerLinux, "[minidock] processo-local-real indisponível no host atual; execução redirecionada para container-linux."
 		}
 		return ModeDemo, "[minidock] PostgreSQL real indisponível no host atual; execução redirecionada para modo demo com evidências plausíveis."
 	}
@@ -308,6 +307,15 @@ func collectDemoSignals(demo DemoDefinition, workload Workload) []string {
 	if workload.Mode == ModeContainerLinux {
 		signals = append(signals, "Execução realizada em isolamento Linux com rootfs dedicado.")
 	}
+	if workload.Runtime.ModeUsed == string(PostgresModeProcessLocalReal) {
+		signals = append(signals, "Modo usado: Processo local real com binários do host.")
+	}
+	if workload.Runtime.ModeUsed == string(PostgresModeContainerLinux) {
+		signals = append(signals, "Modo usado: Container Linux.")
+	}
+	if workload.Runtime.ModeUsed == string(PostgresModeDemo) {
+		signals = append(signals, "Modo usado: Demo.")
+	}
 	if workload.FallbackApplied {
 		signals = append(signals, "Fallback automático aplicado para preservar experiência de demonstração.")
 	}
@@ -323,6 +331,9 @@ func collectDemoSignals(demo DemoDefinition, workload Workload) []string {
 		}
 		if workload.Runtime.DataDir != "" {
 			signals = append(signals, fmt.Sprintf("Data directory observado: %s.", workload.Runtime.DataDir))
+		}
+		if workload.Runtime.MainPID > 0 {
+			signals = append(signals, fmt.Sprintf("PID principal registrado: %d.", workload.Runtime.MainPID))
 		}
 		if strings.EqualFold(workload.Runtime.ReadinessState, "ready") || containsReadyLog(workload.Logs) {
 			signals = append(signals, "Readiness consistente: banco pronto para conexões.")
@@ -343,6 +354,9 @@ func buildDemoSummary(demo DemoDefinition, workload Workload, success bool) []st
 	if workload.Mode == ModeContainerLinux {
 		lines = append(lines, "O modo container-linux ampliou a fidelidade técnica da execução demonstrada.")
 	}
+	if workload.Runtime.ModeUsed == string(PostgresModeProcessLocalReal) {
+		lines = append(lines, "O modo processo-local-real foi priorizado para maximizar a fidelidade técnica em Linux real.")
+	}
 	if workload.FallbackApplied {
 		lines = append(lines, "O host atual não suportou o modo avançado integral; fallback controlado preservou a UX do produto.")
 	}
@@ -350,6 +364,7 @@ func buildDemoSummary(demo DemoDefinition, workload Workload, success bool) []st
 	if isDatabaseWorkload(demo.WorkloadType) {
 		if strings.EqualFold(workload.Runtime.ReadinessState, "ready") || containsReadyLog(workload.Logs) {
 			lines = append(lines, "O PostgreSQL foi inicializado com sucesso e apresentou sinais esperados de readiness e operação.")
+			lines = append(lines, "O serviço apresentou sinais consistentes de readiness.")
 		} else {
 			lines = append(lines, "A workload PostgreSQL mantém narrativa stateful, porém sem readiness conclusivo neste ciclo.")
 		}

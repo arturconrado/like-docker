@@ -81,7 +81,7 @@ export function WorkloadsBoard({ workloads, loading, onSelect, onStop, onRemove 
             <button
               type="button"
               onClick={() => onStop(workload)}
-              disabled={workload.status !== 'Running' && workload.status !== 'Pending'}
+              disabled={!['Pending', 'Preparing', 'Starting', 'Running'].includes(workload.status)}
               className="inline-flex items-center gap-2 rounded-lg border border-amber-400/30 px-3 py-2 text-xs font-semibold text-amber-200 transition enabled:hover:bg-amber-500/20 disabled:cursor-not-allowed disabled:opacity-50"
             >
               <PauseCircle className="size-4" />

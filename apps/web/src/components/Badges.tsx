@@ -6,6 +6,8 @@ import type { RiskLevel, RuntimeMode, WorkloadStatus } from '../types'
 
 const statusStyles: Record<WorkloadStatus, string> = {
   Pending: 'bg-zinc-700/70 text-zinc-100 border-zinc-500/60',
+  Preparing: 'bg-amber-500/20 text-amber-100 border-amber-400/50',
+  Starting: 'bg-sky-500/20 text-sky-100 border-sky-400/50',
   Running: 'bg-cyan-500/20 text-cyan-200 border-cyan-400/50',
   Completed: 'bg-emerald-500/20 text-emerald-200 border-emerald-400/50',
   Failed: 'bg-rose-500/20 text-rose-100 border-rose-400/50',

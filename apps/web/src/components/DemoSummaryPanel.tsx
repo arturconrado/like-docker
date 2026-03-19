@@ -1,4 +1,4 @@
-import { modeLabel } from '../lib/format'
+import { modeLabel, postgresModeLabel } from '../lib/format'
 import type { DemoDefinition, DemoValidation, HostCapabilities, Workload } from '../types'
 
 interface DemoSummaryPanelProps {
@@ -37,15 +37,19 @@ function buildFallbackSummary(
 
   if (workload) {
     lines.push(`Modo efetivo observado: ${modeLabel(workload.mode)}.`)
+    if (workload.runtime.modeUsed) {
+      lines.push(`Modo usado pela demo PostgreSQL: ${postgresModeLabel(workload.runtime.modeUsed)}.`)
+    }
     if (workload.fallbackApplied) {
       lines.push('O host atual não suportou o modo avançado; fallback foi aplicado para preservar a UX.')
     }
-  } else if (capabilities && demo.preferredMode === 'container-linux' && !capabilities.supportsContainers) {
-    lines.push('O host atual não suporta container-linux; a execução será redirecionada automaticamente.')
+  } else if (capabilities && !capabilities.canRunPostgresDemo) {
+    lines.push(`O host atual não suporta o caminho real; modo recomendado: ${postgresModeLabel(capabilities.recommendedPostgresMode)}.`)
   }
 
   if (demo.id === 'postgres-demo') {
     lines.push('A workload PostgreSQL demonstra suporte a cenário stateful com observabilidade operacional.')
+    lines.push('O modo real foi priorizado para maximizar fidelidade técnica da demonstração.')
   }
 
   return lines.slice(0, 4)

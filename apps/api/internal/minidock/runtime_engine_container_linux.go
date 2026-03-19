@@ -43,6 +43,10 @@ func (e *LinuxContainerEngine) Create(workload Workload) (*RuntimeHandle, error)
 		Args:              cloneStringSlice(workload.Args),
 		Rootfs:            rootfs,
 		ContainerHostname: hostname,
+		Port:              workload.Runtime.Port,
+		DataDir:           workload.Runtime.DataDir,
+		ReadinessState:    workload.Runtime.ReadinessState,
+		ModeUsed:          workload.Runtime.ModeUsed,
 	}, nil
 }
 
@@ -228,5 +232,9 @@ func (e *LinuxContainerEngine) Inspect(handle *RuntimeHandle) RuntimeInspect {
 		Rootfs:            handle.Rootfs,
 		ContainerHostname: handle.ContainerHostname,
 		MainPID:           handle.MainPID,
+		Port:              handle.Port,
+		DataDir:           handle.DataDir,
+		ReadinessState:    handle.ReadinessState,
+		ModeUsed:          handle.ModeUsed,
 	}
 }

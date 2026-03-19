@@ -1,4 +1,4 @@
-import { commandLabel, modeLabel } from '../lib/format'
+import { commandLabel, modeLabel, postgresModeLabel } from '../lib/format'
 import type { DemoDefinition, DemoValidation, Workload } from '../types'
 
 interface EvidencePanelProps {
@@ -14,9 +14,13 @@ export function EvidencePanel({ demo, workload, validation, validationLoading }:
     : workload
       ? [
           `Modo efetivo: ${modeLabel(workload.mode)}`,
+          `Modo usado: ${postgresModeLabel(workload.runtime.modeUsed || workload.mode)}`,
           `Status atual: ${workload.status}`,
           workload.fallbackApplied ? 'Fallback aplicado por limitação do host.' : 'Execução sem fallback.',
           `${workload.logs.length} linha(s) de log coletadas.`,
+          (workload.runtime.port ?? 0) > 0 ? `Porta observada: ${workload.runtime.port}` : 'Porta ainda não publicada.',
+          workload.runtime.dataDir ? `Data directory observado: ${workload.runtime.dataDir}` : 'Data directory ainda não publicado.',
+          workload.runtime.readinessState ? `Readiness: ${workload.runtime.readinessState}` : 'Readiness ainda não publicado.',
         ]
       : []
 

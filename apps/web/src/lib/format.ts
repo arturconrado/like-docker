@@ -37,6 +37,24 @@ export function modeLabel(mode?: string | null) {
   return mode
 }
 
+export function postgresModeLabel(mode?: string | null) {
+  if (!mode) return '—'
+  if (mode === 'processo-local-real') return 'Processo local real'
+  if (mode === 'container-linux') return 'Container Linux'
+  if (mode === 'demo') return 'Demo'
+  return modeLabel(mode)
+}
+
+export function postgresOperationalStatus(status?: string | null, readinessState?: string | null) {
+  if (!status) return '—'
+  if (status === 'Preparing') return 'Preparing'
+  if (status === 'Starting') return 'Starting'
+  if (status === 'Pending' && readinessState === 'preparing') return 'Preparing'
+  if (status === 'Running' && readinessState === 'starting') return 'Starting'
+  if (status === 'Running' && readinessState === 'ready') return 'Running'
+  return status
+}
+
 export function titleCase(value: string) {
   return value.charAt(0).toUpperCase() + value.slice(1)
 }

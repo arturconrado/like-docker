@@ -6,6 +6,8 @@ type WorkloadStatus string
 
 const (
 	StatusPending   WorkloadStatus = "Pending"
+	StatusPreparing WorkloadStatus = "Preparing"
+	StatusStarting  WorkloadStatus = "Starting"
 	StatusRunning   WorkloadStatus = "Running"
 	StatusCompleted WorkloadStatus = "Completed"
 	StatusFailed    WorkloadStatus = "Failed"
@@ -29,6 +31,20 @@ const (
 	ModeNamespaceRuntime RuntimeMode = "namespace-runtime" // alias legado
 )
 
+type PostgresDemoMode string
+
+const (
+	PostgresModeProcessLocalReal PostgresDemoMode = "processo-local-real"
+	PostgresModeContainerLinux   PostgresDemoMode = "container-linux"
+	PostgresModeDemo             PostgresDemoMode = "demo"
+)
+
+type PostgresBinaryPaths struct {
+	Initdb    string `json:"initdb,omitempty"`
+	Postgres  string `json:"postgres,omitempty"`
+	PGIsReady string `json:"pgIsready,omitempty"`
+}
+
 type RuntimeMetadata struct {
 	Engine            string `json:"engine"`
 	Isolated          bool   `json:"isolated"`
@@ -39,6 +55,7 @@ type RuntimeMetadata struct {
 	Port              int    `json:"port,omitempty"`
 	DataDir           string `json:"dataDir,omitempty"`
 	ReadinessState    string `json:"readinessState,omitempty"`
+	ModeUsed          string `json:"modeUsed,omitempty"`
 }
 
 type Workload struct {

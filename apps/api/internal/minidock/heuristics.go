@@ -148,8 +148,15 @@ func InsightsFor(w Workload) []string {
 	}
 	if isDatabaseWorkload(w.WorkloadType) {
 		insights = append(insights, "A workload PostgreSQL demonstra suporte a cenário stateful com observabilidade operacional.")
+		if w.Runtime.ModeUsed == string(PostgresModeProcessLocalReal) {
+			insights = append(insights, "Workload de banco de dados iniciada com binários locais reais do PostgreSQL.")
+		}
+		if w.Runtime.ModeUsed == string(PostgresModeDemo) {
+			insights = append(insights, "Modo demonstrativo foi acionado explicitamente para preservar a jornada quando o host não suportou a execução real.")
+		}
 		if strings.EqualFold(w.Runtime.ReadinessState, "ready") {
 			insights = append(insights, "Foram observados sinais consistentes de readiness do serviço de banco.")
+			insights = append(insights, "A demonstração valida suporte a workload stateful em Linux.")
 		}
 		if w.Runtime.Port > 0 {
 			insights = append(insights, fmt.Sprintf("Porta operacional registrada: %d.", w.Runtime.Port))
@@ -199,9 +206,11 @@ func SuggestedActionFor(w Workload) string {
 	case w.RiskLevel == RiskRisky:
 		return "Revisar intenção e comando antes de qualquer nova execução."
 	case isDatabaseWorkload(w.WorkloadType) && w.Status == StatusRunning:
-		return "Acompanhar logs de readiness; encerrar após validar porta, data dir e status operacional."
+		return "Validar conexão local antes de encerrar a workload."
 	case isDatabaseWorkload(w.WorkloadType) && w.Status == StatusCompleted:
-		return "Consolidar evidências de inicialização do PostgreSQL e remover workload ao finalizar a apresentação."
+		return "Seguro remover após inspeção de readiness e logs."
+	case isDatabaseWorkload(w.WorkloadType) && w.Status == StatusStopped:
+		return "Seguro remover após inspeção de readiness e logs."
 	case w.FallbackApplied:
 		return "Validar capabilities do host e repetir em Linux compatível para demonstrar isolamento real."
 	case w.Mode == ModeContainerLinux && w.Status == StatusCompleted:
