@@ -38,6 +38,7 @@ O produto oferece execução de workloads, observabilidade visual e narrativa de
 ```
 
 Detalhes: [`docs/architecture.md`](docs/architecture.md)
+Comparativo com artigo InfoQ: [`docs/report-infoq-comparison.md`](docs/report-infoq-comparison.md)
 
 ## 4. Como rodar localmente
 
@@ -82,9 +83,10 @@ Execução real com `exec.CommandContext`, compatível com qualquer ambiente loc
 ### `container-linux`
 Execução avançada em Linux com:
 - namespaces `UTS`, `PID` e `mount`
-- rootfs dedicado
+- rootfs dedicado com `pivot_root`
 - hostname isolado
 - processo PID 1 no namespace isolado
+- cgroups com estratégia `v2 -> v1` para limites de recursos
 
 ### Cadeia de fallback
 Quando `container-linux` não está disponível:
@@ -95,8 +97,9 @@ Quando `container-linux` não está disponível:
 
 ### O que esse modo faz
 - Isola a workload em namespaces Linux.
-- Executa dentro de rootfs dedicado.
+- Executa dentro de rootfs dedicado via `pivot_root`.
 - Mantém logs, stop/remove e insights no mesmo fluxo da UI.
+- Expõe evidências técnicas (`pivotRootApplied`, `cgroupPath`, `cgroupVersion`).
 
 ### O que esse modo não é
 - Não é Docker Engine completo.
@@ -133,10 +136,14 @@ sudo MINIDOCK_RUNTIME_MODE=container-linux make api
 ### Como validar que funcionou
 - Endpoint `GET /api/capabilities` deve indicar:
   - `supportsContainers: true`
+  - `supportsPivotRoot: true`
+  - `supportsCgroups: true` (quando disponível)
   - `rootfsAvailable: true`
 - Na UI, executar `container-identity-check`.
 - No drawer, validar:
   - modo efetivo `container-linux`
+  - `pivotRootApplied=true`
+  - `cgroupPath` preenchido
   - `rootfs` preenchido
   - `containerHostname` preenchido
   - `mainPid` preenchido
@@ -224,9 +231,27 @@ Arquivo de exemplo: [`.env.example`](.env.example)
 - `MINIDOCK_RUNTIME_MODE=processo-local|demo|container-linux`
 - `MINIDOCK_SEED_DEMO=true|false`
 - `MINIDOCK_CONTAINER_ROOTFS=./examples/rootfs/demo`
+- `MINIDOCK_CGROUP_PIDS_MAX=256`
+- `MINIDOCK_CGROUP_MEMORY_MAX=1073741824`
+- `MINIDOCK_CGROUP_CPU_MAX=200000 100000`
 - `VITE_API_BASE_URL=http://localhost:8080`
 
-## 12. Limitações
+## 12. Exemplo Didático (estilo artigo)
+
+Para estudo técnico, o repositório inclui um binário standalone:
+
+- `apps/api/cmd/container100` (Linux only)
+
+Uso:
+
+```bash
+cd apps/api
+go run ./cmd/container100 run ./../../examples/rootfs/demo /bin/sh -c "hostname && pwd && ls /"
+```
+
+Este comando é educacional e não deve ser usado em produção.
+
+## 13. Limitações
 - Estado em memória (sem persistência).
 - Sem autenticação.
 - Sem orquestração Kubernetes.

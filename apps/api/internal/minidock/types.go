@@ -51,6 +51,9 @@ type RuntimeMetadata struct {
 	Rootfs            string `json:"rootfs,omitempty"`
 	ContainerHostname string `json:"containerHostname,omitempty"`
 	MainPID           int    `json:"mainPid,omitempty"`
+	PivotRootApplied  bool   `json:"pivotRootApplied,omitempty"`
+	CgroupPath        string `json:"cgroupPath,omitempty"`
+	CgroupVersion     string `json:"cgroupVersion,omitempty"`
 	WorkloadType      string `json:"workloadType,omitempty"`
 	Port              int    `json:"port,omitempty"`
 	DataDir           string `json:"dataDir,omitempty"`

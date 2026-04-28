@@ -1,11 +1,13 @@
 package minidock
 
 import (
+	"fmt"
 	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 )
 
@@ -15,6 +17,9 @@ type HostCapabilities struct {
 	SupportsProcessLocal       bool                `json:"supportsProcessLocal"`
 	SupportsContainers         bool                `json:"supportsContainers"`
 	SupportsNamespaces         bool                `json:"supportsNamespaces"`
+	SupportsCgroups            bool                `json:"supportsCgroups"`
+	CgroupVersion              string              `json:"cgroupVersion"`
+	CgroupNotes                []string            `json:"cgroupNotes"`
 	SupportsPivotRoot          bool                `json:"supportsPivotRoot"`
 	RootfsAvailable            bool                `json:"rootfsAvailable"`
 	RootfsPath                 string              `json:"rootfsPath,omitempty"`
@@ -53,9 +58,9 @@ func DetectHostCapabilities(rootfsHint string) HostCapabilities {
 		fileExists("/proc/self/ns/mnt") &&
 		fileExists("/proc/self/ns/pid") &&
 		fileExists("/proc/self/ns/uts")
-	supportsPivotRoot := isLinux && hasRoot && fileExists("/proc/self/ns/mnt")
-
-	supportsContainers := isLinux && supportsNamespaces && rootfsAvailable && hasRoot
+	cgroupSupport := DetectCgroupSupport()
+	supportsPivotRoot, pivotNotes := detectPivotRootSupport(isLinux, hasRoot, rootfsPath, rootfsAvailable)
+	supportsContainers := isLinux && supportsNamespaces && rootfsAvailable && hasRoot && supportsPivotRoot
 
 	notes := make([]string, 0, 4)
 	if !isLinux {
@@ -70,8 +75,14 @@ func DetectHostCapabilities(rootfsHint string) HostCapabilities {
 	if isLinux && !supportsNamespaces {
 		notes = append(notes, "Namespaces Linux mínimos não foram detectados no host.")
 	}
+	if isLinux && !cgroupSupport.Supported {
+		notes = append(notes, "Cgroups não detectados no host; container-linux pode funcionar sem limites de recursos.")
+	}
 	if !rootfsAvailable {
 		notes = append(notes, "Rootfs de demonstração não disponível; use scripts/prepare-rootfs.sh para habilitar container-linux.")
+	}
+	if isLinux && hasRoot && !supportsPivotRoot {
+		notes = append(notes, "Pivot_root não pôde ser validado no host/rootfs atual.")
 	}
 	if supportsContainers {
 		notes = append(notes, "Host apto para execução container-linux em modo avançado.")
@@ -94,6 +105,8 @@ func DetectHostCapabilities(rootfsHint string) HostCapabilities {
 	if canRunPostgresDemo {
 		notes = append(notes, "O PostgreSQL Demo pode rodar em Linux real com binários locais do host.")
 	}
+	notes = append(notes, pivotNotes...)
+	notes = append(notes, cgroupSupport.Notes...)
 
 	recommended := ModeProcessLocal
 	if supportsContainers {
@@ -115,6 +128,9 @@ func DetectHostCapabilities(rootfsHint string) HostCapabilities {
 		SupportsProcessLocal:       true,
 		SupportsContainers:         supportsContainers,
 		SupportsNamespaces:         supportsNamespaces,
+		SupportsCgroups:            cgroupSupport.Supported,
+		CgroupVersion:              cgroupSupport.Version,
+		CgroupNotes:                cloneStringSlice(cgroupSupport.Notes),
 		SupportsPivotRoot:          supportsPivotRoot,
 		RootfsAvailable:            rootfsAvailable,
 		RootfsPath:                 rootfsPath,
@@ -129,8 +145,24 @@ func DetectHostCapabilities(rootfsHint string) HostCapabilities {
 		CanAllocatePort:            canAllocatePort,
 		CanRunPostgresDemo:         canRunPostgresDemo,
 		RecommendedPostgresMode:    recommendedPostgresMode,
-		Notes:                      notes,
+		Notes:                      uniqueNonEmptyStrings(notes),
 	}
+}
+
+func detectPivotRootSupport(isLinux, hasRoot bool, rootfsPath string, rootfsAvailable bool) (bool, []string) {
+	if !isLinux {
+		return false, nil
+	}
+	if !hasRoot {
+		return false, []string{"Pivot_root requer privilégios root (CAP_SYS_ADMIN)."}
+	}
+	if !rootfsAvailable {
+		return false, []string{"Pivot_root requer rootfs válido com /bin/sh disponível."}
+	}
+	if !hasLinuxCapabilitySysAdmin() {
+		return false, []string{"CAP_SYS_ADMIN não detectada no processo atual; pivot_root tende a falhar."}
+	}
+	return true, []string{fmt.Sprintf("Pivot_root validado por pré-requisitos de kernel/capabilities em %s.", rootfsPath)}
 }
 
 func resolveRootfsPath(rootfsHint string) string {
@@ -236,4 +268,44 @@ func hasRootfsBinary(rootfsPath, name string) bool {
 		}
 	}
 	return false
+}
+
+func hasLinuxCapabilitySysAdmin() bool {
+	raw, err := os.ReadFile("/proc/self/status")
+	if err != nil {
+		return false
+	}
+	for _, line := range strings.Split(string(raw), "\n") {
+		if !strings.HasPrefix(line, "CapEff:") {
+			continue
+		}
+		parts := strings.Fields(line)
+		if len(parts) < 2 {
+			return false
+		}
+		value, err := strconv.ParseUint(parts[1], 16, 64)
+		if err != nil {
+			return false
+		}
+		const capSysAdminBit = 21
+		return value&(uint64(1)<<capSysAdminBit) != 0
+	}
+	return false
+}
+
+func uniqueNonEmptyStrings(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			continue
+		}
+		if _, ok := seen[trimmed]; ok {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		result = append(result, trimmed)
+	}
+	return result
 }

@@ -9,9 +9,9 @@
 - Arquitetura de runtime:
   - `DemoEngine`
   - `LocalProcessEngine`
-  - `LinuxContainerEngine` (Linux + namespaces + chroot)
+  - `LinuxContainerEngine` (Linux + namespaces + pivot_root + cgroups)
 - Execução real via `exec.CommandContext` no modo `processo-local`.
-- Modo `container-linux` com isolamento real (UTS/PID/MNT namespace + rootfs dedicado).
+- Modo `container-linux` com isolamento real (UTS/PID/MNT namespace + rootfs dedicado via `pivot_root` + cgroup v2/v1).
 - Fallback automático: `container-linux` -> `processo-local` -> `demo`.
 - Modo `demo` para execução simulada e seed de dados plausíveis.
 - Endpoints centrais:

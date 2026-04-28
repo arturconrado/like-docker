@@ -18,6 +18,9 @@ export interface RuntimeMetadata {
   rootfs?: string
   containerHostname?: string
   mainPid?: number
+  pivotRootApplied?: boolean
+  cgroupPath?: string
+  cgroupVersion?: string
   workloadType?: string
   port?: number
   dataDir?: string
@@ -71,6 +74,9 @@ export interface HostCapabilities {
   supportsProcessLocal: boolean
   supportsContainers: boolean
   supportsNamespaces: boolean
+  supportsCgroups: boolean
+  cgroupVersion: string
+  cgroupNotes: string[]
   supportsPivotRoot: boolean
   rootfsAvailable: boolean
   rootfsPath?: string

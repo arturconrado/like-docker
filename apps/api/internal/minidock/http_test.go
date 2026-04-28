@@ -135,6 +135,12 @@ func TestContainerModeFallback(t *testing.T) {
 	if !created.FallbackApplied {
 		t.Fatal("esperava fallback aplicado para container-linux sem rootfs disponível")
 	}
+	if created.Runtime.PivotRootApplied {
+		t.Fatal("não esperava pivot_root aplicado após fallback para processo-local")
+	}
+	if created.Runtime.CgroupPath != "" {
+		t.Fatalf("cgroupPath deveria estar vazio após fallback, recebido %q", created.Runtime.CgroupPath)
+	}
 
 	logs := waitForLogs(t, server, created.ID)
 	foundFallback := false
@@ -174,6 +180,12 @@ func TestCapabilitiesEndpoint(t *testing.T) {
 	}
 	if caps.RecommendedPostgresMode == "" {
 		t.Fatal("recommendedPostgresMode não pode ser vazio")
+	}
+	if caps.CgroupVersion == "" {
+		t.Fatal("cgroupVersion não pode ser vazio")
+	}
+	if len(caps.CgroupNotes) == 0 {
+		t.Fatal("cgroupNotes deve retornar ao menos uma nota de diagnóstico")
 	}
 }
 

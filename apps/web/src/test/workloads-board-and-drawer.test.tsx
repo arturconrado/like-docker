@@ -32,6 +32,9 @@ const sampleWorkload: Workload = {
     rootfs: '',
     containerHostname: '',
     mainPid: 0,
+    pivotRootApplied: true,
+    cgroupPath: '/sys/fs/cgroup/minidock/wk_1',
+    cgroupVersion: 'v2',
     port: 0,
     dataDir: '',
     readinessState: '',
@@ -77,5 +80,7 @@ describe('Lista e drawer de workloads', () => {
     expect(screen.getByText('Insights Executivos')).toBeInTheDocument()
     expect(screen.getByText('[stdout] total 16')).toBeInTheDocument()
     expect(screen.getByText('Próxima ação:')).toBeInTheDocument()
+    expect(screen.getByText('Aplicado')).toBeInTheDocument()
+    expect(screen.getByText('v2')).toBeInTheDocument()
   })
 })

@@ -19,6 +19,8 @@ export function CapabilityPanel({ capabilities, selectedDemo }: CapabilityPanelP
     { label: 'Linux', ok: capabilities.isLinux },
     { label: 'Processo local', ok: capabilities.supportsProcessLocal },
     { label: 'Container Linux', ok: capabilities.supportsContainers },
+    { label: 'Pivot Root', ok: capabilities.supportsPivotRoot },
+    { label: 'Cgroups', ok: capabilities.supportsCgroups },
     { label: 'Rootfs demo', ok: capabilities.rootfsAvailable },
     { label: 'PostgreSQL binários', ok: capabilities.postgresBinariesAvailable },
     { label: 'PGDATA temporário', ok: capabilities.canCreateTempDir },
@@ -40,6 +42,9 @@ export function CapabilityPanel({ capabilities, selectedDemo }: CapabilityPanelP
         <p className="uppercase tracking-[0.14em] text-cyan-200/75">PostgreSQL Demo</p>
         <p className="mt-1 text-sm font-semibold text-cyan-50">
           Modo recomendado: {postgresModeLabel(capabilities.recommendedPostgresMode)}
+        </p>
+        <p className="mt-1 text-[11px] text-cyan-100/80">
+          Cgroup: {capabilities.cgroupVersion || 'none'} · Pivot root: {capabilities.supportsPivotRoot ? 'ok' : 'indisponível'}
         </p>
       </div>
 
@@ -69,6 +74,17 @@ export function CapabilityPanel({ capabilities, selectedDemo }: CapabilityPanelP
           <p className="mt-2 font-mono text-[11px] text-zinc-400">initdb: {capabilities.postgresBinaryPaths.initdb || '—'}</p>
           <p className="mt-1 font-mono text-[11px] text-zinc-400">postgres: {capabilities.postgresBinaryPaths.postgres || '—'}</p>
           <p className="mt-1 font-mono text-[11px] text-zinc-400">pg_isready: {capabilities.postgresBinaryPaths.pgIsready || '—'}</p>
+        </div>
+      )}
+
+      {capabilities.cgroupNotes.length > 0 && (
+        <div className="mt-3 rounded-xl border border-zinc-800 bg-zinc-950/70 px-3 py-3 text-xs text-zinc-300">
+          <p className="uppercase tracking-[0.16em] text-zinc-500">Cgroup Notes</p>
+          <ul className="mt-2 space-y-1 text-zinc-400">
+            {capabilities.cgroupNotes.slice(0, 3).map((note) => (
+              <li key={note}>{note}</li>
+            ))}
+          </ul>
         </div>
       )}
 

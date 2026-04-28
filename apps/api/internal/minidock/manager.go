@@ -82,6 +82,7 @@ func (m *Manager) Health() HealthResponse {
 func (m *Manager) Capabilities() HostCapabilities {
 	caps := m.capabilities
 	caps.Notes = cloneStringSlice(caps.Notes)
+	caps.CgroupNotes = cloneStringSlice(caps.CgroupNotes)
 	return caps
 }
 
@@ -178,6 +179,13 @@ func (m *Manager) CreateWorkload(req CreateWorkloadRequest) (Workload, error) {
 	if inspect.MainPID > 0 {
 		workload.Runtime.MainPID = inspect.MainPID
 	}
+	workload.Runtime.PivotRootApplied = inspect.PivotRootApplied
+	if inspect.CgroupPath != "" {
+		workload.Runtime.CgroupPath = inspect.CgroupPath
+	}
+	if inspect.CgroupVersion != "" {
+		workload.Runtime.CgroupVersion = inspect.CgroupVersion
+	}
 	if inspect.Port > 0 {
 		workload.Runtime.Port = inspect.Port
 	}
@@ -230,6 +238,9 @@ func (m *Manager) fallbackFromEngineCreateError(
 		workload.Runtime.Rootfs = ""
 		workload.Runtime.ContainerHostname = ""
 		workload.Runtime.MainPID = 0
+		workload.Runtime.PivotRootApplied = false
+		workload.Runtime.CgroupPath = ""
+		workload.Runtime.CgroupVersion = ""
 		if handle, err := processEngine.Create(workload); err == nil {
 			return processEngine, handle, workload
 		}
@@ -245,6 +256,9 @@ func (m *Manager) fallbackFromEngineCreateError(
 		workload.Runtime.Rootfs = ""
 		workload.Runtime.ContainerHostname = ""
 		workload.Runtime.MainPID = 0
+		workload.Runtime.PivotRootApplied = false
+		workload.Runtime.CgroupPath = ""
+		workload.Runtime.CgroupVersion = ""
 		if handle, err := demoEngine.Create(workload); err == nil {
 			return demoEngine, handle, workload
 		}
@@ -266,6 +280,109 @@ func appendFallbackReason(current, extra string) string {
 	}
 }
 
+func (m *Manager) prepareRuntimeFallbackAfterContainerFailure(
+	id string,
+	engine RuntimeEngine,
+	result RuntimeExecutionResult,
+) (RuntimeEngine, *RuntimeHandle, bool) {
+	if engine == nil || engine.Mode() != ModeContainerLinux || result.Status != StatusFailed {
+		return nil, nil, false
+	}
+
+	note := "[minidock] falha durante inicialização container-linux; fallback automático para modo alternativo."
+	if detail := strings.TrimSpace(result.ExtraLog); detail != "" {
+		note = note + " " + detail
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	entry, ok := m.workloads[id]
+	if !ok || entry.data.FinishedAt != nil {
+		return nil, nil, false
+	}
+	lowerDetail := strings.ToLower(strings.TrimSpace(result.ExtraLog))
+	shouldFallback := !entry.data.Runtime.PivotRootApplied ||
+		strings.Contains(lowerDetail, "cgroup") ||
+		strings.Contains(lowerDetail, "falha ao iniciar container-linux") ||
+		strings.Contains(lowerDetail, "rootfs indisponível")
+	if !shouldFallback {
+		return nil, nil, false
+	}
+
+	tryMode := func(mode RuntimeMode) (RuntimeEngine, *RuntimeHandle, bool) {
+		candidate := cloneWorkload(entry.data)
+		candidate.Mode = mode
+		candidate.FallbackApplied = true
+		candidate.FallbackReason = appendFallbackReason(candidate.FallbackReason, note)
+		candidate.Runtime.Engine = string(mode) + "-engine"
+		candidate.Runtime.Isolated = mode == ModeContainerLinux
+		candidate.Runtime.Rootfs = ""
+		candidate.Runtime.ContainerHostname = ""
+		candidate.Runtime.MainPID = 0
+		candidate.Runtime.PivotRootApplied = false
+		candidate.Runtime.CgroupPath = ""
+		candidate.Runtime.CgroupVersion = ""
+
+		nextEngine := m.engineForMode(mode)
+		nextHandle, err := nextEngine.Create(candidate)
+		if err != nil || nextHandle == nil {
+			return nil, nil, false
+		}
+
+		inspect := nextEngine.Inspect(nextHandle)
+		candidate.Runtime.Engine = inspect.Engine
+		candidate.Runtime.Isolated = inspect.Isolated
+		if inspect.Rootfs != "" {
+			candidate.Runtime.Rootfs = inspect.Rootfs
+		}
+		if inspect.ContainerHostname != "" {
+			candidate.Runtime.ContainerHostname = inspect.ContainerHostname
+		}
+		if inspect.MainPID > 0 {
+			candidate.Runtime.MainPID = inspect.MainPID
+		}
+		candidate.Runtime.PivotRootApplied = inspect.PivotRootApplied
+		if inspect.CgroupPath != "" {
+			candidate.Runtime.CgroupPath = inspect.CgroupPath
+		}
+		if inspect.CgroupVersion != "" {
+			candidate.Runtime.CgroupVersion = inspect.CgroupVersion
+		}
+		if inspect.Port > 0 {
+			candidate.Runtime.Port = inspect.Port
+		}
+		if inspect.DataDir != "" {
+			candidate.Runtime.DataDir = inspect.DataDir
+		}
+		if inspect.ReadinessState != "" {
+			candidate.Runtime.ReadinessState = inspect.ReadinessState
+		}
+		if inspect.ModeUsed != "" {
+			candidate.Runtime.ModeUsed = inspect.ModeUsed
+		}
+
+		candidate.AIInsights = InsightsFor(candidate)
+		candidate.SuggestedAction = SuggestedActionFor(candidate)
+		entry.data = candidate
+		entry.engine = nextEngine
+		entry.runtimeHandle = nextHandle
+		return nextEngine, nextHandle, true
+	}
+
+	if nextEngine, nextHandle, ok := tryMode(ModeProcessLocal); ok {
+		entry.data.Logs = append(entry.data.Logs, note)
+		go m.addEvent("workload_fallback", id, "Fallback automático de runtime aplicado", SeverityWarn)
+		return nextEngine, nextHandle, true
+	}
+	if nextEngine, nextHandle, ok := tryMode(ModeDemo); ok {
+		entry.data.Logs = append(entry.data.Logs, note)
+		go m.addEvent("workload_fallback", id, "Fallback automático de runtime aplicado", SeverityWarn)
+		return nextEngine, nextHandle, true
+	}
+	return nil, nil, false
+}
+
 func (m *Manager) runWorkload(id string) {
 	_, ok := m.transitionToRunning(id)
 	if !ok {
@@ -279,7 +396,7 @@ func (m *Manager) runWorkload(id string) {
 		return
 	}
 
-	result := engine.Start(ctx, handle, RuntimeHooks{
+	hooks := RuntimeHooks{
 		OnLog: func(line string) {
 			m.appendLog(id, line)
 		},
@@ -292,7 +409,11 @@ func (m *Manager) runWorkload(id string) {
 		OnRuntimeUpdate: func(update RuntimeUpdate) {
 			m.applyRuntimeUpdate(id, update)
 		},
-	})
+	}
+	result := engine.Start(ctx, handle, hooks)
+	if fallbackEngine, fallbackHandle, fallbackApplied := m.prepareRuntimeFallbackAfterContainerFailure(id, engine, result); fallbackApplied {
+		result = fallbackEngine.Start(ctx, fallbackHandle, hooks)
+	}
 	m.finishWithRuntimeResult(id, result)
 }
 
@@ -665,6 +786,15 @@ func (m *Manager) finishWithRuntimeResult(id string, result RuntimeExecutionResu
 	if w.runtimeHandle != nil && w.runtimeHandle.MainPID > 0 {
 		w.data.Runtime.MainPID = w.runtimeHandle.MainPID
 	}
+	if w.runtimeHandle != nil {
+		w.data.Runtime.PivotRootApplied = w.runtimeHandle.PivotRootApplied
+		if strings.TrimSpace(w.runtimeHandle.CgroupPath) != "" {
+			w.data.Runtime.CgroupPath = w.runtimeHandle.CgroupPath
+		}
+		if strings.TrimSpace(w.runtimeHandle.CgroupVersion) != "" {
+			w.data.Runtime.CgroupVersion = w.runtimeHandle.CgroupVersion
+		}
+	}
 	switch result.Status {
 	case StatusCompleted:
 		if isDatabaseWorkload(w.data.WorkloadType) &&
@@ -758,6 +888,24 @@ func (m *Manager) applyRuntimeUpdate(id string, update RuntimeUpdate) {
 	if update.Isolated != nil {
 		w.data.Runtime.Isolated = *update.Isolated
 	}
+	if update.PivotRootApplied != nil {
+		w.data.Runtime.PivotRootApplied = *update.PivotRootApplied
+		if w.runtimeHandle != nil {
+			w.runtimeHandle.PivotRootApplied = *update.PivotRootApplied
+		}
+	}
+	if update.CgroupPath != nil {
+		w.data.Runtime.CgroupPath = *update.CgroupPath
+		if w.runtimeHandle != nil {
+			w.runtimeHandle.CgroupPath = *update.CgroupPath
+		}
+	}
+	if update.CgroupVersion != nil {
+		w.data.Runtime.CgroupVersion = *update.CgroupVersion
+		if w.runtimeHandle != nil {
+			w.runtimeHandle.CgroupVersion = *update.CgroupVersion
+		}
+	}
 	if update.Port != nil {
 		w.data.Runtime.Port = *update.Port
 		if w.runtimeHandle != nil {
@@ -800,8 +948,14 @@ func (m *Manager) appendLog(id, line string) {
 		return
 	}
 	w.data.Logs = append(w.data.Logs, line)
+	lower := strings.ToLower(line)
+	if strings.Contains(lower, "pivot_root aplicado") {
+		w.data.Runtime.PivotRootApplied = true
+		if w.runtimeHandle != nil {
+			w.runtimeHandle.PivotRootApplied = true
+		}
+	}
 	if isDatabaseWorkload(w.data.WorkloadType) {
-		lower := strings.ToLower(line)
 		if strings.Contains(lower, "ready to accept connections") || strings.Contains(lower, "readiness: ready") {
 			w.data.Runtime.ReadinessState = "ready"
 			if w.data.Status == StatusPreparing || w.data.Status == StatusStarting {

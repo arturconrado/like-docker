@@ -15,7 +15,10 @@ import (
 const containerInitCommand = "__minidock_container_init"
 
 func HandleContainerInitCommand() bool {
-	if len(os.Args) < 2 || os.Args[1] != containerInitCommand {
+	if len(os.Args) < 2 {
+		return false
+	}
+	if os.Args[1] != containerInitCommand {
 		return false
 	}
 	if err := runContainerInit(os.Args[2:]); err != nil {
@@ -44,12 +47,10 @@ func runContainerInit(args []string) error {
 	if err := syscall.Mount("", "/", "", uintptr(syscall.MS_REC|syscall.MS_PRIVATE), ""); err != nil {
 		return fmt.Errorf("falha ao isolar mount namespace: %w", err)
 	}
-	if err := syscall.Chroot(rootfs); err != nil {
-		return fmt.Errorf("falha em chroot: %w", err)
+	if err := pivotRootInto(rootfs); err != nil {
+		return err
 	}
-	if err := os.Chdir("/"); err != nil {
-		return fmt.Errorf("falha ao entrar no rootfs: %w", err)
-	}
+	_, _ = fmt.Fprintln(os.Stdout, "[container-linux] pivot_root aplicado com sucesso")
 
 	if err := os.MkdirAll("/proc", 0o755); err != nil {
 		return fmt.Errorf("falha ao preparar /proc: %w", err)
@@ -67,6 +68,36 @@ func runContainerInit(args []string) error {
 	env := containerInitEnv()
 
 	return syscall.Exec(resolved, argv, env)
+}
+
+func pivotRootInto(rootfs string) error {
+	if !filepath.IsAbs(rootfs) {
+		abs, err := filepath.Abs(rootfs)
+		if err != nil {
+			return fmt.Errorf("falha ao resolver rootfs absoluto: %w", err)
+		}
+		rootfs = abs
+	}
+	if err := syscall.Mount(rootfs, rootfs, "", uintptr(syscall.MS_BIND|syscall.MS_REC), ""); err != nil {
+		return fmt.Errorf("falha ao bind-mount do rootfs: %w", err)
+	}
+	oldRoot := filepath.Join(rootfs, ".minidock-oldroot")
+	if err := os.MkdirAll(oldRoot, 0o700); err != nil {
+		return fmt.Errorf("falha ao preparar oldroot: %w", err)
+	}
+	if err := syscall.PivotRoot(rootfs, oldRoot); err != nil {
+		return fmt.Errorf("falha em pivot_root: %w", err)
+	}
+	if err := os.Chdir("/"); err != nil {
+		return fmt.Errorf("falha ao entrar no rootfs: %w", err)
+	}
+	if err := syscall.Unmount("/.minidock-oldroot", syscall.MNT_DETACH); err != nil {
+		return fmt.Errorf("falha ao desmontar oldroot: %w", err)
+	}
+	if err := os.RemoveAll("/.minidock-oldroot"); err != nil {
+		return fmt.Errorf("falha ao limpar oldroot: %w", err)
+	}
+	return nil
 }
 
 func parseContainerInitArgs(args []string) (string, string, string, []string, error) {

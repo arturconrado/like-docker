@@ -99,6 +99,18 @@ export function WorkloadDrawer({ workload, stopping, removing, onClose, onStop, 
                   <dd className="text-zinc-200">{(workload.runtime.mainPid ?? 0) > 0 ? workload.runtime.mainPid : '—'}</dd>
                 </div>
                 <div>
+                  <dt className="text-zinc-500">Pivot Root</dt>
+                  <dd className="text-zinc-200">{workload.runtime.pivotRootApplied ? 'Aplicado' : '—'}</dd>
+                </div>
+                <div>
+                  <dt className="text-zinc-500">Cgroup version</dt>
+                  <dd className="text-zinc-200">{workload.runtime.cgroupVersion || '—'}</dd>
+                </div>
+                <div>
+                  <dt className="text-zinc-500">Cgroup path</dt>
+                  <dd className="truncate text-zinc-200">{workload.runtime.cgroupPath || '—'}</dd>
+                </div>
+                <div>
                   <dt className="text-zinc-500">Porta</dt>
                   <dd className="text-zinc-200">{(workload.runtime.port ?? 0) > 0 ? workload.runtime.port : '—'}</dd>
                 </div>

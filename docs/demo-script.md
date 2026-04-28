@@ -18,7 +18,7 @@
 ## 4. Operar ciclo de vida
 - Rodar `controlled-sleep` no catálogo de demos.
 - Mostrar status `Running` -> `Completed` ou interromper com `Stop`.
-- Abrir drawer para exibir modo solicitado vs modo efetivo, rootfs/hostname/PID e logs.
+- Abrir drawer para exibir modo solicitado vs modo efetivo, pivot_root, cgroup, rootfs/hostname/PID e logs.
 
 ## 5. Diagnóstico e fallback
 - Rodar `runtime-diagnostics`.

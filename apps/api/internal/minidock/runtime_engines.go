@@ -20,6 +20,9 @@ type RuntimeInspect struct {
 	Rootfs            string
 	ContainerHostname string
 	MainPID           int
+	PivotRootApplied  bool
+	CgroupPath        string
+	CgroupVersion     string
 	Port              int
 	DataDir           string
 	ReadinessState    string
@@ -33,6 +36,9 @@ type RuntimeHandle struct {
 	Rootfs            string
 	ContainerHostname string
 	MainPID           int
+	PivotRootApplied  bool
+	CgroupPath        string
+	CgroupVersion     string
 	Port              int
 	DataDir           string
 	ReadinessState    string
@@ -41,16 +47,19 @@ type RuntimeHandle struct {
 }
 
 type RuntimeUpdate struct {
-	Status          *WorkloadStatus
-	Mode            *RuntimeMode
-	Engine          *string
-	Isolated        *bool
-	Port            *int
-	DataDir         *string
-	ReadinessState  *string
-	ModeUsed        *string
-	FallbackApplied *bool
-	FallbackReason  *string
+	Status           *WorkloadStatus
+	Mode             *RuntimeMode
+	Engine           *string
+	Isolated         *bool
+	PivotRootApplied *bool
+	CgroupPath       *string
+	CgroupVersion    *string
+	Port             *int
+	DataDir          *string
+	ReadinessState   *string
+	ModeUsed         *string
+	FallbackApplied  *bool
+	FallbackReason   *string
 }
 
 type RuntimeHooks struct {
@@ -196,12 +205,15 @@ func (e *DemoEngine) Inspect(handle *RuntimeHandle) RuntimeInspect {
 		}
 	}
 	return RuntimeInspect{
-		Engine:         "demo-engine",
-		Isolated:       false,
-		Port:           handle.Port,
-		DataDir:        handle.DataDir,
-		ReadinessState: handle.ReadinessState,
-		ModeUsed:       handle.ModeUsed,
+		Engine:           "demo-engine",
+		Isolated:         false,
+		PivotRootApplied: handle.PivotRootApplied,
+		CgroupPath:       handle.CgroupPath,
+		CgroupVersion:    handle.CgroupVersion,
+		Port:             handle.Port,
+		DataDir:          handle.DataDir,
+		ReadinessState:   handle.ReadinessState,
+		ModeUsed:         handle.ModeUsed,
 	}
 }
 
@@ -371,13 +383,16 @@ func (e *LocalProcessEngine) Inspect(handle *RuntimeHandle) RuntimeInspect {
 		}
 	}
 	return RuntimeInspect{
-		Engine:         "local-process-engine",
-		Isolated:       false,
-		MainPID:        handle.MainPID,
-		Port:           handle.Port,
-		DataDir:        handle.DataDir,
-		ReadinessState: handle.ReadinessState,
-		ModeUsed:       handle.ModeUsed,
+		Engine:           "local-process-engine",
+		Isolated:         false,
+		MainPID:          handle.MainPID,
+		PivotRootApplied: handle.PivotRootApplied,
+		CgroupPath:       handle.CgroupPath,
+		CgroupVersion:    handle.CgroupVersion,
+		Port:             handle.Port,
+		DataDir:          handle.DataDir,
+		ReadinessState:   handle.ReadinessState,
+		ModeUsed:         handle.ModeUsed,
 	}
 }
 

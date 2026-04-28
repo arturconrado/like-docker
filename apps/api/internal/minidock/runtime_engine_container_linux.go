@@ -13,11 +13,15 @@ import (
 )
 
 type LinuxContainerEngine struct {
-	rootfsPath string
+	rootfsPath   string
+	cgroupLimits CgroupLimits
 }
 
 func NewLinuxContainerEngine(rootfsPath string) *LinuxContainerEngine {
-	return &LinuxContainerEngine{rootfsPath: strings.TrimSpace(rootfsPath)}
+	return &LinuxContainerEngine{
+		rootfsPath:   strings.TrimSpace(rootfsPath),
+		cgroupLimits: LoadCgroupLimitsFromEnv(),
+	}
 }
 
 func (e *LinuxContainerEngine) Mode() RuntimeMode {
@@ -43,6 +47,7 @@ func (e *LinuxContainerEngine) Create(workload Workload) (*RuntimeHandle, error)
 		Args:              cloneStringSlice(workload.Args),
 		Rootfs:            rootfs,
 		ContainerHostname: hostname,
+		PivotRootApplied:  false,
 		Port:              workload.Runtime.Port,
 		DataDir:           workload.Runtime.DataDir,
 		ReadinessState:    workload.Runtime.ReadinessState,
@@ -133,6 +138,34 @@ func (e *LinuxContainerEngine) Start(ctx context.Context, handle *RuntimeHandle,
 	if cmd.Process != nil {
 		handle.MainPID = cmd.Process.Pid
 		safePID(hooks.OnMainPID, cmd.Process.Pid)
+	}
+
+	workloadCgroup, err := AttachWorkloadCgroup(handle.WorkloadID, handle.MainPID, e.cgroupLimits)
+	if err != nil {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		return RuntimeExecutionResult{
+			Status:      StatusFailed,
+			ExitCode:    1,
+			ExtraLog:    fmt.Sprintf("Falha ao aplicar cgroup na workload: %v", err),
+			EventType:   "workload_failed",
+			EventLabel:  "Workload falhou",
+			EventLevel:  SeverityError,
+			FinishedErr: err,
+		}
+	}
+	if workloadCgroup != nil {
+		handle.CgroupPath = workloadCgroup.Path
+		handle.CgroupVersion = workloadCgroup.Version
+		safeRuntimeUpdate(hooks.OnRuntimeUpdate, RuntimeUpdate{
+			CgroupPath:    ptrString(workloadCgroup.Path),
+			CgroupVersion: ptrString(workloadCgroup.Version),
+		})
+		defer func() {
+			if cleanupErr := workloadCgroup.Cleanup(); cleanupErr != nil {
+				safeLog(hooks.OnLog, fmt.Sprintf("[container-linux] aviso ao limpar cgroup: %v", cleanupErr))
+			}
+		}()
 	}
 
 	var wg sync.WaitGroup
@@ -232,6 +265,9 @@ func (e *LinuxContainerEngine) Inspect(handle *RuntimeHandle) RuntimeInspect {
 		Rootfs:            handle.Rootfs,
 		ContainerHostname: handle.ContainerHostname,
 		MainPID:           handle.MainPID,
+		PivotRootApplied:  handle.PivotRootApplied,
+		CgroupPath:        handle.CgroupPath,
+		CgroupVersion:     handle.CgroupVersion,
 		Port:              handle.Port,
 		DataDir:           handle.DataDir,
 		ReadinessState:    handle.ReadinessState,
